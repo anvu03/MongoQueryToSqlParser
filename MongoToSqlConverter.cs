@@ -3,11 +3,6 @@ using System.Text.Json.Nodes;
 
 namespace MongoSqlParser;
 
-public class InvalidQueryException : Exception
-{
-    public InvalidQueryException(string message) : base(message) { }
-}
-
 public class MongoToSqlConverter
 {
     // === Configuration and State ===
