@@ -176,7 +176,6 @@ RunAttributeMapperTest("Integration with Complex Mapping",
 );
 
 Console.WriteLine("\n=== AttributeMapper Tests Completed ===");
-Console.ReadLine();
 
 // ---------------------------------------------------------
 // Simple Custom Test Harness
