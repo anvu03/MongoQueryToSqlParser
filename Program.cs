@@ -272,6 +272,7 @@ static void RunAttributeMapperTest(string testName, Func<bool> testFunc)
             Console.WriteLine("   Test assertion failed.");
         }
     }
+    // Catch all exceptions in test harness to report as test failures
     catch (Exception ex)
     {
         PrintResult(testName, false);
