@@ -157,6 +157,22 @@ RunAttributeMapperTest("Model With Partial Attributes",
     }
 );
 
+// Test 6: Integration test - Complex mapping with AttributeMapper
+RunAttributeMapperTest("Integration with Complex Mapping",
+    () => {
+        var fieldMap = AttributeMapper.ExtractFieldMapping<ProductModel>();
+        var converterWithMapping = new MongoToSqlConverter(fieldMap);
+        
+        string query = @"{ ""Metadata"": ""some-value"" }";
+        var result = converterWithMapping.Parse(query);
+        
+        // Should map Metadata to JSON_VALUE(p.data, '$.metadata')
+        return result.WhereClause == "JSON_VALUE(p.data, '$.metadata') = @p0" &&
+               result.Parameters.Count == 1 &&
+               result.Parameters["@p0"].ToString() == "some-value";
+    }
+);
+
 Console.WriteLine("\n=== AttributeMapper Tests Completed ===");
 Console.ReadLine();
 
