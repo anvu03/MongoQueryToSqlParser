@@ -138,22 +138,24 @@ RunAttributeMapperTest("Integration with MongoToSqlConverter",
     }
 );
 
-// Test 4: Model without any attributes
-RunAttributeMapperTest("Model Without Attributes Returns Empty Dictionary",
+// Test 4: Model without any attributes (should map properties to themselves)
+RunAttributeMapperTest("Model Without Attributes Maps To Itself",
     () => {
         var mapping = AttributeMapper.ExtractFieldMapping<PlainModel>();
-        return mapping.Count == 0;
+        return mapping.Count == 2 &&
+               mapping["Id"] == "Id" &&
+               mapping["Name"] == "Name";
     }
 );
 
-// Test 5: Model with partial attributes
+// Test 5: Model with partial attributes (includes all properties, uses property name as fallback)
 RunAttributeMapperTest("Model With Partial Attributes",
     () => {
         var mapping = AttributeMapper.ExtractFieldMapping<PartialModel>();
-        return mapping.Count == 2 &&
+        return mapping.Count == 3 &&
                mapping["Id"] == "id" &&
-               mapping["Name"] == "name";
-        // Status property should not be in the mapping since it lacks ColumnAttribute
+               mapping["Name"] == "name" &&
+               mapping["Status"] == "Status"; // Property without attribute maps to itself
     }
 );
 

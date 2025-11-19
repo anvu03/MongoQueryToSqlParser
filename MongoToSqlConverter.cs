@@ -63,7 +63,7 @@ public class MongoToSqlConverter
         result.Parameters = context.Parameters;
 
         // 2. Sorting and Pagination (ORDER BY / OFFSET)
-        if (obj.TryGetPropertyValue("$sort", out JsonNode? sortNode) && sortNode != null)
+        if (obj.TryGetPropertyValue("$sort", out JsonNode? sortNode))
         {
             result.OrderByClause = context.ParseSort(sortNode);
         }
