@@ -38,18 +38,14 @@ public static class AttributeMapper
         {
             // Check if property has ColumnAttribute
             var columnAttr = property.GetCustomAttribute<ColumnAttribute>();
-            
-            if (columnAttr != null)
-            {
-                // Use property name as the key
-                string fieldName = property.Name;
-                
-                // Use the column name from the attribute
-                // Microsoft's ColumnAttribute.Name property contains the column name
-                string columnName = columnAttr.Name ?? property.Name;
-                
-                mapping[fieldName] = columnName;
-            }
+
+            // Use property name as the key
+            string fieldName = property.Name;
+
+            // Use the column name from the attribute if present, otherwise fallback to property name
+            string columnName = columnAttr?.Name ?? property.Name;
+
+            mapping[fieldName] = columnName;
         }
 
         return mapping;
