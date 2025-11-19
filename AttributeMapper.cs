@@ -31,9 +31,6 @@ public static class AttributeMapper
 
         var mapping = new Dictionary<string, string>();
 
-        // Get table information (optional, not directly used in mapping but available)
-        var tableAttr = modelType.GetCustomAttribute<TableAttribute>();
-
         // Iterate through all public properties
         var properties = modelType.GetProperties(BindingFlags.Public | BindingFlags.Instance);
         
