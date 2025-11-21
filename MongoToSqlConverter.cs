@@ -352,8 +352,9 @@ public class MongoToSqlConverter
                         }
                         else
                         {
-                            // Literal string
-                            parts.Add($"'{str}'" );
+                            // Literal string - Use parameterized value for security
+                            string paramName = AddParameter(str);
+                            parts.Add(paramName);
                         }
                     }
                 }
@@ -380,8 +381,9 @@ public class MongoToSqlConverter
                     }
                     else
                     {
-                        // Literal number
-                        operands.Add(GetValue(item!).ToString()!);
+                        // Literal number - Use parameterized value for security
+                        string paramName = AddParameter(GetValue(item!));
+                        operands.Add(paramName);
                     }
                 }
 
@@ -421,10 +423,11 @@ public class MongoToSqlConverter
 
                 if (arr[1] is JsonValue val1)
                 {
-                    defaultValue = $"'{GetValue(val1)}'";
+                    // Use parameterized value for security
+                    defaultValue = AddParameter(GetValue(val1));
                 }
 
-                if (!string.IsNullOrEmpty(field))
+                if (!string.IsNullOrEmpty(field) && !string.IsNullOrEmpty(defaultValue))
                 {
                     return $"ISNULL({field}, {defaultValue}) AS [{alias}]";
                 }

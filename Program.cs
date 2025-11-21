@@ -122,7 +122,7 @@ RunProjectTest(converter, "Field Aliasing",
 // Test 4: String concatenation
 RunProjectTest(converter, "String Concatenation",
     json: @"{ ""$project"": { ""fullName"": { ""$concat"": [""$firstName"", "" "", ""$lastName""] } } }",
-    expectedSelect: "CONCAT([firstName], ' ', [lastName]) AS [fullName]",
+    expectedSelect: "CONCAT([firstName], @p0, [lastName]) AS [fullName]",
     expectedWhere: "1=1"
 );
 
@@ -143,7 +143,7 @@ RunProjectTest(converter, "Arithmetic Subtraction",
 // Test 7: ISNULL handling
 RunProjectTest(converter, "ISNULL Handling",
     json: @"{ ""$project"": { ""displayName"": { ""$ifNull"": [""$nickname"", ""Unknown""] } } }",
-    expectedSelect: "ISNULL([nickname], 'Unknown') AS [displayName]",
+    expectedSelect: "ISNULL([nickname], @p0) AS [displayName]",
     expectedWhere: "1=1"
 );
 
@@ -174,6 +174,35 @@ RunProjectTest(converter, "Arithmetic Division",
 );
 
 Console.WriteLine("\n=== $project Operator Tests Completed ===");
+
+// === SQL Injection Security Tests ===
+Console.WriteLine("\n=== Starting SQL Injection Security Tests ===\n");
+
+// Test 1: Attempt SQL injection via $concat literal string
+RunSecurityProjectTest(converter, "SQL Injection via $concat",
+    json: @"{ ""$project"": { ""malicious"": { ""$concat"": [""test'; DROP TABLE Users; --""] } } }",
+    shouldBeParameterized: true
+);
+
+// Test 2: Attempt SQL injection via $ifNull default value
+RunSecurityProjectTest(converter, "SQL Injection via $ifNull",
+    json: @"{ ""$project"": { ""exploit"": { ""$ifNull"": [""$name"", ""'; DROP TABLE Users; --""] } } }",
+    shouldBeParameterized: true
+);
+
+// Test 3: Attempt SQL injection via $add arithmetic operand
+RunSecurityProjectTest(converter, "SQL Injection via $add",
+    json: @"{ ""$project"": { ""exploit"": { ""$add"": [""$price"", ""1; DROP TABLE Users; --""] } } }",
+    shouldBeParameterized: true
+);
+
+// Test 4: Complex injection attempt with nested expressions
+RunSecurityProjectTest(converter, "Complex SQL Injection Attempt",
+    json: @"{ ""$project"": { ""hack"": { ""$concat"": [""$name"", ""' OR '1'='1""] } } }",
+    shouldBeParameterized: true
+);
+
+Console.WriteLine("\n=== SQL Injection Security Tests Completed ===");
 
 Console.WriteLine("\n=== Tests Completed ===");
 
@@ -355,6 +384,56 @@ static void RunProjectTest(
             {
                 Console.WriteLine($"   Expected ORDER BY: {expectedOrderBy}");
                 Console.WriteLine($"   Actual ORDER BY:   {result.OrderByClause}");
+            }
+        }
+    }
+    catch (Exception ex)
+    {
+        PrintResult(testName, false);
+        Console.WriteLine($"   Exception: {ex.Message}");
+    }
+}
+
+static void RunSecurityProjectTest(
+    MongoToSqlConverter converter,
+    string testName,
+    string json,
+    bool shouldBeParameterized)
+{
+    try
+    {
+        var result = converter.Parse(json);
+
+        // Check if dangerous strings are NOT directly in the SQL (they should be in parameters)
+        bool hasDirectInjection = result.SelectClause.Contains("DROP TABLE") || 
+                                   result.SelectClause.Contains("'; ") ||
+                                   result.SelectClause.Contains("OR '1'='1");
+
+        // Check if values are properly parameterized
+        bool hasParameters = result.Parameters.Count > 0;
+
+        bool isSecure = !hasDirectInjection && (shouldBeParameterized ? hasParameters : true);
+
+        if (isSecure)
+        {
+            PrintResult(testName, true);
+            if (result.Parameters.Count > 0)
+            {
+                Console.WriteLine($"   ✓ Values safely parameterized: {result.Parameters.Count} parameter(s)");
+            }
+        }
+        else
+        {
+            PrintResult(testName, false);
+            Console.WriteLine($"   ✗ SECURITY ISSUE: SQL injection vulnerability detected!");
+            Console.WriteLine($"   Generated SELECT: {result.SelectClause}");
+            if (hasDirectInjection)
+            {
+                Console.WriteLine($"   ✗ Dangerous string found directly in SQL!");
+            }
+            if (shouldBeParameterized && !hasParameters)
+            {
+                Console.WriteLine($"   ✗ Expected parameterized values but found none!");
             }
         }
     }

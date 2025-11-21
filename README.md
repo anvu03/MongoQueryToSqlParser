@@ -150,8 +150,9 @@ string mongoQuery = @"{
 
 var result = converter.Parse(mongoQuery);
 
-/* Generated SQL:
-SELECT CONCAT([firstName], ' ', [lastName]) AS [fullName] FROM ...
+/* Generated SQL (secure parameterized):
+SELECT CONCAT([firstName], @p0, [lastName]) AS [fullName] FROM ...
+Parameters: @p0 = " "
 */
 ```
 
@@ -218,8 +219,9 @@ string mongoQuery = @"{
 
 var result = converter.Parse(mongoQuery);
 
-/* Generated SQL:
-SELECT ISNULL([nickname], 'Unknown') AS [displayName] FROM ...
+/* Generated SQL (secure parameterized):
+SELECT ISNULL([nickname], @p0) AS [displayName] FROM ...
+Parameters: @p0 = "Unknown"
 */
 ```
 
