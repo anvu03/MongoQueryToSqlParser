@@ -147,6 +147,140 @@ RunProjectTest(converter, "No Projection Defaults to SELECT *",
 
 Console.WriteLine("\n=== $project Operator Tests Completed ===");
 
+// === SQL Injection via Field Names Tests ===
+Console.WriteLine("\n=== Starting Field Name Injection Tests ===\n");
+
+// Test 1: Block SQL injection via malicious field name with semicolon
+RunSecurityTest(converter, "Block Field Name with Semicolon",
+    json: @"{ ""users]; DROP TABLE Users; --"": ""value"" }"
+);
+
+// Test 2: Block field name with brackets
+RunSecurityTest(converter, "Block Field Name with Brackets",
+    json: @"{ ""[malicious]"": ""value"" }"
+);
+
+// Test 3: Block field name with single quote
+RunSecurityTest(converter, "Block Field Name with Quote",
+    json: @"{ ""'; DELETE FROM Users --"": ""value"" }"
+);
+
+// Test 4: Block field name with space
+RunSecurityTest(converter, "Block Field Name with Space",
+    json: @"{ ""user name"": ""value"" }"
+);
+
+// Test 5: Allow valid field names with dots (for nested paths)
+try
+{
+    var result = converter.Parse(@"{ ""profile.country"": ""USA"" }", (s) => $"JSON_VALUE(Data, '$.{s}')");
+    PrintResult("Allow Valid Field Name with Dots", true);
+}
+catch
+{
+    PrintResult("Allow Valid Field Name with Dots", false);
+}
+
+Console.WriteLine("\n=== Field Name Injection Tests Completed ===");
+
+// === Field Allowlist Security Tests ===
+Console.WriteLine("\n=== Starting Field Allowlist Security Tests ===\n");
+
+// Define allowlist of approved fields
+var allowedFields = new HashSet<string> { "user_id", "email", "status", "age", "name" };
+var secureConverter = new MongoToSqlConverter(allowedFields: allowedFields);
+
+// Test 1: Query with allowed field succeeds
+try
+{
+    var result = secureConverter.Parse(@"{ ""user_id"": 123 }");
+    if (result.WhereClause == "[user_id] = @p0")
+    {
+        PrintResult("Allow Approved Field (user_id)", true);
+    }
+    else
+    {
+        PrintResult("Allow Approved Field (user_id)", false);
+    }
+}
+catch (Exception ex)
+{
+    PrintResult("Allow Approved Field (user_id)", false);
+    Console.WriteLine($"   Unexpected error: {ex.Message}");
+}
+
+// Test 2: Query with non-allowed field is blocked
+try
+{
+    secureConverter.Parse(@"{ ""password"": ""secret"" }");
+    PrintResult("Block Non-Approved Field (password)", false);
+    Console.WriteLine("   Expected SecurityException, but none was thrown.");
+}
+catch (System.Security.SecurityException)
+{
+    PrintResult("Block Non-Approved Field (password)", true);
+}
+catch (Exception ex)
+{
+    PrintResult("Block Non-Approved Field (password)", false);
+    Console.WriteLine($"   Wrong exception: {ex.GetType().Name} - {ex.Message}");
+}
+
+// Test 3: Even valid-looking field names are blocked if not in allowlist
+try
+{
+    secureConverter.Parse(@"{ ""valid_field_name"": ""value"" }");
+    PrintResult("Block Valid Name Not in Allowlist", false);
+    Console.WriteLine("   Expected SecurityException, but none was thrown.");
+}
+catch (System.Security.SecurityException)
+{
+    PrintResult("Block Valid Name Not in Allowlist", true);
+}
+catch (Exception ex)
+{
+    PrintResult("Block Valid Name Not in Allowlist", false);
+    Console.WriteLine($"   Wrong exception: {ex.GetType().Name}");
+}
+
+// Test 4: Multiple allowed fields work correctly
+try
+{
+    var result = secureConverter.Parse(@"{ ""email"": ""test@example.com"", ""status"": ""active"" }");
+    if (result.WhereClause.Contains("[email]") && result.WhereClause.Contains("[status]"))
+    {
+        PrintResult("Allow Multiple Approved Fields", true);
+    }
+    else
+    {
+        PrintResult("Allow Multiple Approved Fields", false);
+    }
+}
+catch (Exception ex)
+{
+    PrintResult("Allow Multiple Approved Fields", false);
+    Console.WriteLine($"   Unexpected error: {ex.Message}");
+}
+
+// Test 5: Malicious field names are blocked even before injection attempt
+try
+{
+    secureConverter.Parse(@"{ ""users]; DROP TABLE Users; --"": ""value"" }");
+    PrintResult("Block Malicious Field via Allowlist", false);
+    Console.WriteLine("   Expected SecurityException, but none was thrown.");
+}
+catch (System.Security.SecurityException)
+{
+    PrintResult("Block Malicious Field via Allowlist", true);
+}
+catch (Exception ex)
+{
+    PrintResult("Block Malicious Field via Allowlist", false);
+    Console.WriteLine($"   Wrong exception: {ex.GetType().Name}");
+}
+
+Console.WriteLine("\n=== Field Allowlist Security Tests Completed ===");
+
 Console.WriteLine("\n=== Tests Completed ===");
 
 // === AttributeMapper Tests ===
@@ -276,11 +410,16 @@ static void RunSecurityTest(MongoToSqlConverter converter, string testName, stri
         converter.Parse(json);
         // If we get here, it failed to throw
         PrintResult(testName, false);
-        Console.WriteLine("   Expected SecurityException, but none was thrown.");
+        Console.WriteLine("   Expected SecurityException or InvalidQueryException, but none was thrown.");
     }
     catch (System.Security.SecurityException)
     {
         // Success, we caught the hacker
+        PrintResult(testName, true);
+    }
+    catch (InvalidQueryException)
+    {
+        // Success, we caught invalid/malicious input
         PrintResult(testName, true);
     }
     catch (Exception ex)

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 
 namespace MongoSqlParser;
 
@@ -19,6 +20,9 @@ public class MongoToSqlConverter
         "$project", "$sort", "$limit", "$skip"
     };
 
+    // SECURITY: Field name validation regex to prevent SQL injection via column names (fallback)
+    private static readonly Regex _validFieldName = new Regex(@"^[a-zA-Z_][a-zA-Z0-9_\.]*$", RegexOptions.Compiled);
+
     private static readonly Dictionary<string, string> _simpleOps = new()
     {
         { "$eq", "=" },
@@ -30,10 +34,17 @@ public class MongoToSqlConverter
     };
 
     private readonly Dictionary<string, string> _fieldMap;
+    private readonly HashSet<string>? _allowedFields;
 
-    public MongoToSqlConverter(Dictionary<string, string>? fieldMap = null)
+    /// <summary>
+    /// Creates a new MongoToSqlConverter instance.
+    /// </summary>
+    /// <param name="fieldMap">Optional mapping of public field names to SQL column identifiers.</param>
+    /// <param name="allowedFields">Optional allowlist of permitted field names. If provided, only these fields will be accepted. For maximum security, always provide this list.</param>
+    public MongoToSqlConverter(Dictionary<string, string>? fieldMap = null, HashSet<string>? allowedFields = null)
     {
         _fieldMap = fieldMap ?? new Dictionary<string, string>();
+        _allowedFields = allowedFields;
     }
 
     // === Main Entry Point ===
@@ -61,7 +72,7 @@ public class MongoToSqlConverter
         var obj = root.AsObject();
         columnMapper ??= (field) => $"[{field}]";
 
-        var context = new ParseContext(columnMapper, _fieldMap);
+        var context = new ParseContext(columnMapper, _fieldMap, _allowedFields);
 
         // 1. Projection (SELECT clause)
         if (obj.TryGetPropertyValue("$project", out JsonNode? projectNode) && projectNode != null)
@@ -91,11 +102,13 @@ public class MongoToSqlConverter
         private int _paramCounter = 0;
         private readonly Func<string, string> _columnMapper;
         private readonly Dictionary<string, string> _fieldMap;
+        private readonly HashSet<string>? _allowedFields;
 
-        public ParseContext(Func<string, string> columnMapper, Dictionary<string, string> fieldMap)
+        public ParseContext(Func<string, string> columnMapper, Dictionary<string, string> fieldMap, HashSet<string>? allowedFields)
         {
             _columnMapper = columnMapper;
             _fieldMap = fieldMap;
+            _allowedFields = allowedFields;
         }
 
         // --- Core Parsing Methods ---
@@ -329,6 +342,20 @@ public class MongoToSqlConverter
 
         private string GetMappedSqlIdentifier(string field)
         {
+            // SECURITY: Check allowlist first (strongest protection)
+            if (_allowedFields != null)
+            {
+                if (!_allowedFields.Contains(field))
+                {
+                    throw new System.Security.SecurityException($"Field '{field}' is not in the allowed fields list. Only explicitly approved fields can be queried.");
+                }
+            }
+            // SECURITY: Fallback to regex validation if no allowlist provided
+            else if (!_validFieldName.IsMatch(field))
+            {
+                throw new InvalidQueryException($"Invalid field name: '{field}'. Field names must start with a letter or underscore and contain only alphanumeric characters, underscores, or dots.");
+            }
+
             // 1. Resolve the Public Field Name to the SQL Identifier (may be aliased/qualified from _fieldMap)
             string sqlIdentifier = field;
             bool wasMapped = false;

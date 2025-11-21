@@ -6,16 +6,72 @@ A robust and secure library for translating human-readable, MongoDB-style JSON q
 
 ### ✨ Features
 
+  * **Maximum Security with Field Allowlists:** Enforces explicit field name allowlists - only approved fields can be queried, preventing any SQL injection via column names.
   * **Secure Parameterization:** Automatically converts all values into Dapper-compatible parameters (`@p0`, `@p1`) to prevent SQL Injection.
   * **Complex Logic Translation:** Supports nested `$or`, `$and`, `$not`, `$in`, and all comparison operators (`$gt`, `$lte`, etc.).
-  * **Projection Support:** MongoDB-style `$project` operator to control SELECT clause with field inclusion, aliasing, and computed expressions.
+  * **Projection Support:** MongoDB-style `$project` operator to control SELECT clause with basic field inclusion/exclusion.
   * **Flexible Field Mapping:** Allows mapping public-facing field names (e.g., `"reg_date"`) to complex internal identifiers (e.g., `"u.registration_dt"`).
   * **Attribute-Based Mapping:** Automatically extract field-to-column mappings from model classes using Microsoft's `[Table]` and `[Column]` attributes.
   * **Pagination & Sorting:** Converts MongoDB's `$sort`, `$limit`, and `$skip` directly into SQL Server's `ORDER BY` and `OFFSET/FETCH` clauses.
-  * **Security:** Enforces an operator **Allow-list** to immediately block dangerous injection vectors like `$where` and `$script`.
+  * **Defense in Depth:** Multi-layer security with operator allow-lists, field allowlists, and regex validation fallback.
   * **Null Handling:** Correctly translates MongoDB's `null` and `$exists` checks into standard SQL `IS NULL`/`IS NOT NULL` statements.
 
 ### 🚀 Usage Example
+
+#### Maximum Security Mode (Recommended)
+
+For production environments, always use field allowlists to ensure only explicitly approved fields can be queried:
+
+```csharp
+// 1. Define approved fields (allowlist)
+var allowedFields = new HashSet<string> { "user_id", "email", "status", "age", "reg_date" };
+
+// 2. Optional: Define field mapping
+var fieldMap = new Dictionary<string, string>
+{
+    { "user_id", "u.id" },
+    { "reg_date", "u.registration_dt" }
+};
+
+// 3. Create converter with allowlist (MAXIMUM SECURITY)
+var converter = new MongoToSqlConverter(fieldMap, allowedFields);
+
+// 4. Parse query - only allowed fields will be accepted
+string mongoQuery = @"{
+    ""user_id"": 123,
+    ""status"": ""active""
+}";
+
+var result = converter.Parse(mongoQuery);
+// ✅ Success: user_id and status are in the allowlist
+
+// 5. Attempt to query non-allowed field
+try 
+{
+    converter.Parse(@"{ ""password"": ""secret"" }");
+    // ❌ Throws SecurityException: Field 'password' is not in allowed fields list
+}
+catch (System.Security.SecurityException ex)
+{
+    // Field was blocked by allowlist
+}
+```
+
+#### Standard Mode (Regex Validation)
+
+If allowlist is not provided, the converter falls back to regex validation:
+
+```csharp
+// No allowlist provided - uses regex validation
+var converter = new MongoToSqlConverter();
+
+// Field names must match: ^[a-zA-Z_][a-zA-Z0-9_\.]*$
+var result = converter.Parse(@"{ ""user_id"": 123 }"); // ✅ Valid
+// converter.Parse(@"{ ""user name"": 123 }");  // ❌ Throws InvalidQueryException
+// converter.Parse(@"{ ""user]; DROP TABLE"": 1 }"); // ❌ Throws InvalidQueryException
+```
+
+#### Legacy Example
 
 The parser is initialized with a map that defines the entity's public fields and their corresponding internal SQL columns (including aliases or JSON paths).
 
