@@ -8,6 +8,7 @@ A robust and secure library for translating human-readable, MongoDB-style JSON q
 
   * **Secure Parameterization:** Automatically converts all values into Dapper-compatible parameters (`@p0`, `@p1`) to prevent SQL Injection.
   * **Complex Logic Translation:** Supports nested `$or`, `$and`, `$not`, `$in`, and all comparison operators (`$gt`, `$lte`, etc.).
+  * **Projection Support:** MongoDB-style `$project` operator to control SELECT clause with field inclusion, aliasing, and computed expressions.
   * **Flexible Field Mapping:** Allows mapping public-facing field names (e.g., `"reg_date"`) to complex internal identifiers (e.g., `"u.registration_dt"`).
   * **Attribute-Based Mapping:** Automatically extract field-to-column mappings from model classes using Microsoft's `[Table]` and `[Column]` attributes.
   * **Pagination & Sorting:** Converts MongoDB's `$sort`, `$limit`, and `$skip` directly into SQL Server's `ORDER BY` and `OFFSET/FETCH` clauses.
@@ -96,3 +97,165 @@ var result = converter.Parse(mongoQuery);
 WHERE (u.id = @p0 AND u.is_active = @p1 AND u.registration_dt >= @p2)
 */
 ```
+
+### 🎯 Projection with $project Operator
+
+The `$project` operator allows you to control which fields appear in the SELECT clause, similar to MongoDB's aggregation pipeline. It supports field inclusion, exclusion, aliasing, and computed expressions.
+
+#### Basic Field Inclusion
+
+```csharp
+string mongoQuery = @"{
+    ""$project"": { ""name"": 1, ""email"": 1, ""age"": 1 }
+}";
+
+var result = converter.Parse(mongoQuery);
+
+/* Generated SQL:
+SELECT [name], [email], [age] FROM ...
+*/
+```
+
+#### Field Aliasing
+
+Rename fields in the output by referencing them with `$`:
+
+```csharp
+string mongoQuery = @"{
+    ""$project"": { 
+        ""userName"": ""$name"", 
+        ""userEmail"": ""$email"" 
+    }
+}";
+
+var result = converter.Parse(mongoQuery);
+
+/* Generated SQL:
+SELECT [name] AS [userName], [email] AS [userEmail] FROM ...
+*/
+```
+
+#### String Concatenation
+
+Combine multiple fields into one:
+
+```csharp
+string mongoQuery = @"{
+    ""$project"": { 
+        ""fullName"": { 
+            ""$concat"": [""$firstName"", "" "", ""$lastName""] 
+        } 
+    }
+}";
+
+var result = converter.Parse(mongoQuery);
+
+/* Generated SQL:
+SELECT CONCAT([firstName], ' ', [lastName]) AS [fullName] FROM ...
+*/
+```
+
+#### Arithmetic Operations
+
+Perform calculations on numeric fields:
+
+```csharp
+// Addition
+string mongoQuery = @"{
+    ""$project"": { 
+        ""total"": { ""$add"": [""$price"", ""$tax""] } 
+    }
+}";
+
+/* Generated SQL:
+SELECT ([price] + [tax]) AS [total] FROM ...
+*/
+
+// Subtraction
+string mongoQuery = @"{
+    ""$project"": { 
+        ""discount"": { ""$subtract"": [""$price"", ""$discount_amount""] } 
+    }
+}";
+
+/* Generated SQL:
+SELECT ([price] - [discount_amount]) AS [discount] FROM ...
+*/
+
+// Multiplication
+string mongoQuery = @"{
+    ""$project"": { 
+        ""lineTotal"": { ""$multiply"": [""$quantity"", ""$price""] } 
+    }
+}";
+
+/* Generated SQL:
+SELECT ([quantity] * [price]) AS [lineTotal] FROM ...
+*/
+
+// Division
+string mongoQuery = @"{
+    ""$project"": { 
+        ""average"": { ""$divide"": [""$sum"", ""$count""] } 
+    }
+}";
+
+/* Generated SQL:
+SELECT ([sum] / [count]) AS [average] FROM ...
+*/
+```
+
+#### Null Handling with $ifNull
+
+Provide default values for null fields:
+
+```csharp
+string mongoQuery = @"{
+    ""$project"": { 
+        ""displayName"": { ""$ifNull"": [""$nickname"", ""Unknown""] } 
+    }
+}";
+
+var result = converter.Parse(mongoQuery);
+
+/* Generated SQL:
+SELECT ISNULL([nickname], 'Unknown') AS [displayName] FROM ...
+*/
+```
+
+#### Complex Query: Projection + Filter + Sort
+
+Combine multiple operators for powerful queries:
+
+```csharp
+string mongoQuery = @"{
+    ""$project"": { ""name"": 1, ""email"": 1, ""age"": 1 },
+    ""age"": { ""$gt"": 18 },
+    ""status"": ""active"",
+    ""$sort"": { ""name"": 1 },
+    ""$limit"": 10
+}";
+
+var result = converter.Parse(mongoQuery);
+
+/* Generated SQL components:
+SELECT: [name], [email], [age]
+WHERE: ([age] > @p0 AND [status] = @p1)
+ORDER BY: [name] ASC
+PAGINATION: OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY
+*/
+```
+
+### 📊 Supported $project Expressions
+
+| Expression | Description | SQL Translation |
+|------------|-------------|-----------------|
+| `{ "field": 1 }` | Include field | `[field]` |
+| `{ "field": 0 }` | Exclude field | (omitted) |
+| `{ "alias": "$field" }` | Field aliasing | `[field] AS [alias]` |
+| `{ "$concat": [...] }` | String concatenation | `CONCAT(...)` |
+| `{ "$add": [...] }` | Addition | `(a + b)` |
+| `{ "$subtract": [...] }` | Subtraction | `(a - b)` |
+| `{ "$multiply": [...] }` | Multiplication | `(a * b)` |
+| `{ "$divide": [...] }` | Division | `(a / b)` |
+| `{ "$ifNull": [field, default] }` | Null coalescing | `ISNULL(field, default)` |

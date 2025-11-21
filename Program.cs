@@ -95,6 +95,86 @@ RunTest(converter, "Real World Complex Query",
     }
 );
 
+// === $project Operator Tests ===
+Console.WriteLine("\n=== Starting $project Operator Tests ===\n");
+
+// Test 1: Basic field inclusion
+RunProjectTest(converter, "Basic Field Inclusion",
+    json: @"{ ""$project"": { ""name"": 1, ""email"": 1 } }",
+    expectedSelect: "[name], [email]",
+    expectedWhere: "1=1"
+);
+
+// Test 2: Field exclusion (just filtering)
+RunProjectTest(converter, "Field Inclusion with Filter",
+    json: @"{ ""$project"": { ""name"": 1, ""age"": 1 }, ""status"": ""active"" }",
+    expectedSelect: "[name], [age]",
+    expectedWhere: "[status] = @p0"
+);
+
+// Test 3: Field aliasing
+RunProjectTest(converter, "Field Aliasing",
+    json: @"{ ""$project"": { ""userName"": ""$name"", ""userEmail"": ""$email"" } }",
+    expectedSelect: "[name] AS [userName], [email] AS [userEmail]",
+    expectedWhere: "1=1"
+);
+
+// Test 4: String concatenation
+RunProjectTest(converter, "String Concatenation",
+    json: @"{ ""$project"": { ""fullName"": { ""$concat"": [""$firstName"", "" "", ""$lastName""] } } }",
+    expectedSelect: "CONCAT([firstName], ' ', [lastName]) AS [fullName]",
+    expectedWhere: "1=1"
+);
+
+// Test 5: Arithmetic operations - Addition
+RunProjectTest(converter, "Arithmetic Addition",
+    json: @"{ ""$project"": { ""total"": { ""$add"": [""$price"", ""$tax""] } } }",
+    expectedSelect: "([price] + [tax]) AS [total]",
+    expectedWhere: "1=1"
+);
+
+// Test 6: Arithmetic operations - Subtraction
+RunProjectTest(converter, "Arithmetic Subtraction",
+    json: @"{ ""$project"": { ""discount"": { ""$subtract"": [""$price"", ""$discount_amount""] } } }",
+    expectedSelect: "([price] - [discount_amount]) AS [discount]",
+    expectedWhere: "1=1"
+);
+
+// Test 7: ISNULL handling
+RunProjectTest(converter, "ISNULL Handling",
+    json: @"{ ""$project"": { ""displayName"": { ""$ifNull"": [""$nickname"", ""Unknown""] } } }",
+    expectedSelect: "ISNULL([nickname], 'Unknown') AS [displayName]",
+    expectedWhere: "1=1"
+);
+
+// Test 8: Complex - Project with filter and sort
+RunProjectTest(converter, "Complex Query with Project, Filter, and Sort",
+    json: @"{ 
+        ""$project"": { ""name"": 1, ""email"": 1 }, 
+        ""age"": { ""$gt"": 18 },
+        ""$sort"": { ""name"": 1 }
+    }",
+    expectedSelect: "[name], [email]",
+    expectedWhere: "[age] > @p0",
+    expectedOrderBy: "ORDER BY [name] ASC"
+);
+
+// Test 9: Multiply operation
+RunProjectTest(converter, "Arithmetic Multiplication",
+    json: @"{ ""$project"": { ""total"": { ""$multiply"": [""$quantity"", ""$price""] } } }",
+    expectedSelect: "([quantity] * [price]) AS [total]",
+    expectedWhere: "1=1"
+);
+
+// Test 10: Divide operation
+RunProjectTest(converter, "Arithmetic Division",
+    json: @"{ ""$project"": { ""average"": { ""$divide"": [""$sum"", ""$count""] } } }",
+    expectedSelect: "([sum] / [count]) AS [average]",
+    expectedWhere: "1=1"
+);
+
+Console.WriteLine("\n=== $project Operator Tests Completed ===");
+
 Console.WriteLine("\n=== Tests Completed ===");
 
 // === AttributeMapper Tests ===
@@ -235,6 +315,53 @@ static void RunSecurityTest(MongoToSqlConverter converter, string testName, stri
     {
         PrintResult(testName, false);
         Console.WriteLine($"   Wrong exception type: {ex.GetType().Name} - {ex.Message}");
+    }
+}
+
+static void RunProjectTest(
+    MongoToSqlConverter converter,
+    string testName,
+    string json,
+    string expectedSelect,
+    string expectedWhere,
+    string? expectedOrderBy = null)
+{
+    try
+    {
+        var result = converter.Parse(json);
+
+        bool selectMatch = result.SelectClause == expectedSelect;
+        bool whereMatch = result.WhereClause == expectedWhere;
+        bool orderByMatch = expectedOrderBy == null || result.OrderByClause == expectedOrderBy;
+
+        if (selectMatch && whereMatch && orderByMatch)
+        {
+            PrintResult(testName, true);
+        }
+        else
+        {
+            PrintResult(testName, false);
+            if (!selectMatch)
+            {
+                Console.WriteLine($"   Expected SELECT: {expectedSelect}");
+                Console.WriteLine($"   Actual SELECT:   {result.SelectClause}");
+            }
+            if (!whereMatch)
+            {
+                Console.WriteLine($"   Expected WHERE: {expectedWhere}");
+                Console.WriteLine($"   Actual WHERE:   {result.WhereClause}");
+            }
+            if (!orderByMatch)
+            {
+                Console.WriteLine($"   Expected ORDER BY: {expectedOrderBy}");
+                Console.WriteLine($"   Actual ORDER BY:   {result.OrderByClause}");
+            }
+        }
+    }
+    catch (Exception ex)
+    {
+        PrintResult(testName, false);
+        Console.WriteLine($"   Exception: {ex.Message}");
     }
 }
 

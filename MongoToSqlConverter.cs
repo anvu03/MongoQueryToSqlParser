@@ -14,6 +14,11 @@ public class MongoToSqlConverter
         "$in", "$nin", "$or", "$and", "$not", "$regex", "$exists" // Added $exists
     };
 
+    private static readonly HashSet<string> _allowedTopLevelOperators = new()
+    {
+        "$project", "$sort", "$limit", "$skip"
+    };
+
     private static readonly Dictionary<string, string> _simpleOps = new()
     {
         { "$eq", "=" },
@@ -58,12 +63,18 @@ public class MongoToSqlConverter
 
         var context = new ParseContext(columnMapper, _fieldMap);
 
-        // 1. Filtering (WHERE clause)
+        // 1. Projection (SELECT clause)
+        if (obj.TryGetPropertyValue("$project", out JsonNode? projectNode) && projectNode != null)
+        {
+            result.SelectClause = context.ParseProject(projectNode);
+        }
+
+        // 2. Filtering (WHERE clause)
         result.WhereClause = context.ParseObject(root, "AND");
         result.Parameters = context.Parameters;
 
-        // 2. Sorting and Pagination (ORDER BY / OFFSET)
-        if (obj.TryGetPropertyValue("$sort", out JsonNode? sortNode))
+        // 3. Sorting and Pagination (ORDER BY / OFFSET)
+        if (obj.TryGetPropertyValue("$sort", out JsonNode? sortNode) && sortNode != null)
         {
             result.OrderByClause = context.ParseSort(sortNode);
         }
@@ -100,8 +111,8 @@ public class MongoToSqlConverter
                     string key = property.Key;
                     JsonNode? value = property.Value;
 
-                    // Ignore pagination/sort operators from WHERE clause generation
-                    if (key is "$sort" or "$limit" or "$skip") continue;
+                    // Ignore pagination/sort/project operators from WHERE clause generation
+                    if (_allowedTopLevelOperators.Contains(key)) continue;
 
                     if (value == null) continue;
 
@@ -214,6 +225,219 @@ public class MongoToSqlConverter
                 default:
                     throw new InvalidQueryException($"Operator '{op}' logic is not implemented.");
             }
+        }
+
+        // --- Projection Method ---
+
+        public string ParseProject(JsonNode projectNode)
+        {
+            var selectedFields = new List<string>();
+
+            if (projectNode is JsonObject projectObj)
+            {
+                foreach (var prop in projectObj)
+                {
+                    string fieldName = prop.Key;
+                    JsonNode? value = prop.Value;
+
+                    if (value == null) continue;
+
+                    // Check for field aliasing first: { "alias": "$fieldName" }
+                    if (value is JsonValue strVal && strVal.TryGetValue<string>(out string? strValue) && strValue.StartsWith("$"))
+                    {
+                        string sourceField = strValue.TrimStart('$');
+                        string sqlColumn = GetMappedSqlIdentifier(sourceField);
+                        string sqlAlias = fieldName;
+                        selectedFields.Add($"{sqlColumn} AS [{sqlAlias}]");
+                        continue;
+                    }
+
+                    // Handle computed fields (expressions)
+                    if (value is JsonObject exprObj)
+                    {
+                        // For now, we'll support basic field references
+                        // e.g., { "fullName": "$firstName" } or { "total": { "$add": [...] } }
+                        string expression = ParseProjectExpression(fieldName, exprObj);
+                        if (!string.IsNullOrEmpty(expression))
+                        {
+                            selectedFields.Add(expression);
+                        }
+                        continue;
+                    }
+
+                    // Get the inclusion/exclusion value
+                    bool includeField = true;
+                    if (value is JsonValue val)
+                    {
+                        if (val.TryGetValue<int>(out int intValue))
+                        {
+                            includeField = intValue != 0;
+                        }
+                        else if (val.TryGetValue<bool>(out bool boolValue))
+                        {
+                            includeField = boolValue;
+                        }
+                    }
+
+                    // Simple inclusion/exclusion
+                    if (includeField)
+                    {
+                        string sqlColumn = GetMappedSqlIdentifier(fieldName);
+                        selectedFields.Add(sqlColumn);
+                    }
+                }
+            }
+
+            if (selectedFields.Count == 0) return "*";
+            return string.Join(", ", selectedFields);
+        }
+
+        private string ParseProjectExpression(string alias, JsonObject exprObj)
+        {
+            // Handle MongoDB aggregation expressions in $project
+            // For now, we'll support basic operations
+            
+            if (exprObj.Count == 0) return string.Empty;
+
+            var firstProp = exprObj.First();
+            string op = firstProp.Key;
+            JsonNode? value = firstProp.Value;
+
+            if (value == null) return string.Empty;
+
+            switch (op)
+            {
+                case "$concat":
+                    return ParseConcat(alias, value);
+                
+                case "$add":
+                case "$subtract":
+                case "$multiply":
+                case "$divide":
+                    return ParseArithmetic(alias, op, value);
+                
+                case "$literal":
+                    // Return a literal value
+                    if (value is JsonValue litVal)
+                    {
+                        string paramName = AddParameter(GetValue(litVal));
+                        return $"{paramName} AS [{alias}]";
+                    }
+                    break;
+
+                case "$ifNull":
+                    return ParseIfNull(alias, value);
+
+                case "$cond":
+                    return ParseConditional(alias, value);
+            }
+
+            return string.Empty;
+        }
+
+        private string ParseConcat(string alias, JsonNode value)
+        {
+            if (value is JsonArray arr)
+            {
+                var parts = new List<string>();
+                foreach (var item in arr)
+                {
+                    if (item is JsonValue strVal && strVal.TryGetValue<string>(out string? str))
+                    {
+                        if (str.StartsWith("$"))
+                        {
+                            // Field reference
+                            string fieldName = str.TrimStart('$');
+                            parts.Add(GetMappedSqlIdentifier(fieldName));
+                        }
+                        else
+                        {
+                            // Literal string
+                            parts.Add($"'{str}'" );
+                        }
+                    }
+                }
+                if (parts.Count > 0)
+                {
+                    return $"CONCAT({string.Join(", ", parts)}) AS [{alias}]";
+                }
+            }
+            return string.Empty;
+        }
+
+        private string ParseArithmetic(string alias, string op, JsonNode value)
+        {
+            if (value is JsonArray arr && arr.Count >= 2)
+            {
+                var operands = new List<string>();
+                foreach (var item in arr)
+                {
+                    if (item is JsonValue val && val.TryGetValue<string>(out string? str) && str.StartsWith("$"))
+                    {
+                        // Field reference
+                        string fieldName = str.TrimStart('$');
+                        operands.Add(GetMappedSqlIdentifier(fieldName));
+                    }
+                    else
+                    {
+                        // Literal number
+                        operands.Add(GetValue(item!).ToString()!);
+                    }
+                }
+
+                if (operands.Count >= 2)
+                {
+                    string sqlOp = op switch
+                    {
+                        "$add" => "+",
+                        "$subtract" => "-",
+                        "$multiply" => "*",
+                        "$divide" => "/",
+                        _ => "+"
+                    };
+
+                    string expression = operands[0];
+                    for (int i = 1; i < operands.Count; i++)
+                    {
+                        expression = $"({expression} {sqlOp} {operands[i]})";
+                    }
+                    return $"{expression} AS [{alias}]";
+                }
+            }
+            return string.Empty;
+        }
+
+        private string ParseIfNull(string alias, JsonNode value)
+        {
+            if (value is JsonArray arr && arr.Count == 2)
+            {
+                string field = string.Empty;
+                string defaultValue = string.Empty;
+
+                if (arr[0] is JsonValue val0 && val0.TryGetValue<string>(out string? str0) && str0.StartsWith("$"))
+                {
+                    field = GetMappedSqlIdentifier(str0.TrimStart('$'));
+                }
+
+                if (arr[1] is JsonValue val1)
+                {
+                    defaultValue = $"'{GetValue(val1)}'";
+                }
+
+                if (!string.IsNullOrEmpty(field))
+                {
+                    return $"ISNULL({field}, {defaultValue}) AS [{alias}]";
+                }
+            }
+            return string.Empty;
+        }
+
+        private string ParseConditional(string alias, JsonNode value)
+        {
+            // Simplified conditional parsing
+            // Full implementation would parse the condition, then branches
+            // For now, return empty to avoid complexity
+            return string.Empty;
         }
 
         // --- Sorting and Pagination Methods ---
