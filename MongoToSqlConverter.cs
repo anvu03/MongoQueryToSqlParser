@@ -242,29 +242,6 @@ public class MongoToSqlConverter
 
                     if (value == null) continue;
 
-                    // Check for field aliasing first: { "alias": "$fieldName" }
-                    if (value is JsonValue strVal && strVal.TryGetValue<string>(out string? strValue) && strValue.StartsWith("$"))
-                    {
-                        string sourceField = strValue.TrimStart('$');
-                        string sqlColumn = GetMappedSqlIdentifier(sourceField);
-                        string sqlAlias = fieldName;
-                        selectedFields.Add($"{sqlColumn} AS [{sqlAlias}]");
-                        continue;
-                    }
-
-                    // Handle computed fields (expressions)
-                    if (value is JsonObject exprObj)
-                    {
-                        // For now, we'll support basic field references
-                        // e.g., { "fullName": "$firstName" } or { "total": { "$add": [...] } }
-                        string expression = ParseProjectExpression(fieldName, exprObj);
-                        if (!string.IsNullOrEmpty(expression))
-                        {
-                            selectedFields.Add(expression);
-                        }
-                        continue;
-                    }
-
                     // Get the inclusion/exclusion value
                     bool includeField = true;
                     if (value is JsonValue val)
@@ -279,7 +256,7 @@ public class MongoToSqlConverter
                         }
                     }
 
-                    // Simple inclusion/exclusion
+                    // Simple inclusion only - no aliasing or expressions
                     if (includeField)
                     {
                         string sqlColumn = GetMappedSqlIdentifier(fieldName);
@@ -292,156 +269,7 @@ public class MongoToSqlConverter
             return string.Join(", ", selectedFields);
         }
 
-        private string ParseProjectExpression(string alias, JsonObject exprObj)
-        {
-            // Handle MongoDB aggregation expressions in $project
-            // For now, we'll support basic operations
-            
-            if (exprObj.Count == 0) return string.Empty;
 
-            var firstProp = exprObj.First();
-            string op = firstProp.Key;
-            JsonNode? value = firstProp.Value;
-
-            if (value == null) return string.Empty;
-
-            switch (op)
-            {
-                case "$concat":
-                    return ParseConcat(alias, value);
-                
-                case "$add":
-                case "$subtract":
-                case "$multiply":
-                case "$divide":
-                    return ParseArithmetic(alias, op, value);
-                
-                case "$literal":
-                    // Return a literal value
-                    if (value is JsonValue litVal)
-                    {
-                        string paramName = AddParameter(GetValue(litVal));
-                        return $"{paramName} AS [{alias}]";
-                    }
-                    break;
-
-                case "$ifNull":
-                    return ParseIfNull(alias, value);
-
-                case "$cond":
-                    return ParseConditional(alias, value);
-            }
-
-            return string.Empty;
-        }
-
-        private string ParseConcat(string alias, JsonNode value)
-        {
-            if (value is JsonArray arr)
-            {
-                var parts = new List<string>();
-                foreach (var item in arr)
-                {
-                    if (item is JsonValue strVal && strVal.TryGetValue<string>(out string? str))
-                    {
-                        if (str.StartsWith("$"))
-                        {
-                            // Field reference
-                            string fieldName = str.TrimStart('$');
-                            parts.Add(GetMappedSqlIdentifier(fieldName));
-                        }
-                        else
-                        {
-                            // Literal string - Use parameterized value for security
-                            string paramName = AddParameter(str);
-                            parts.Add(paramName);
-                        }
-                    }
-                }
-                if (parts.Count > 0)
-                {
-                    return $"CONCAT({string.Join(", ", parts)}) AS [{alias}]";
-                }
-            }
-            return string.Empty;
-        }
-
-        private string ParseArithmetic(string alias, string op, JsonNode value)
-        {
-            if (value is JsonArray arr && arr.Count >= 2)
-            {
-                var operands = new List<string>();
-                foreach (var item in arr)
-                {
-                    if (item is JsonValue val && val.TryGetValue<string>(out string? str) && str.StartsWith("$"))
-                    {
-                        // Field reference
-                        string fieldName = str.TrimStart('$');
-                        operands.Add(GetMappedSqlIdentifier(fieldName));
-                    }
-                    else
-                    {
-                        // Literal number - Use parameterized value for security
-                        string paramName = AddParameter(GetValue(item!));
-                        operands.Add(paramName);
-                    }
-                }
-
-                if (operands.Count >= 2)
-                {
-                    string sqlOp = op switch
-                    {
-                        "$add" => "+",
-                        "$subtract" => "-",
-                        "$multiply" => "*",
-                        "$divide" => "/",
-                        _ => "+"
-                    };
-
-                    string expression = operands[0];
-                    for (int i = 1; i < operands.Count; i++)
-                    {
-                        expression = $"({expression} {sqlOp} {operands[i]})";
-                    }
-                    return $"{expression} AS [{alias}]";
-                }
-            }
-            return string.Empty;
-        }
-
-        private string ParseIfNull(string alias, JsonNode value)
-        {
-            if (value is JsonArray arr && arr.Count == 2)
-            {
-                string field = string.Empty;
-                string defaultValue = string.Empty;
-
-                if (arr[0] is JsonValue val0 && val0.TryGetValue<string>(out string? str0) && str0.StartsWith("$"))
-                {
-                    field = GetMappedSqlIdentifier(str0.TrimStart('$'));
-                }
-
-                if (arr[1] is JsonValue val1)
-                {
-                    // Use parameterized value for security
-                    defaultValue = AddParameter(GetValue(val1));
-                }
-
-                if (!string.IsNullOrEmpty(field) && !string.IsNullOrEmpty(defaultValue))
-                {
-                    return $"ISNULL({field}, {defaultValue}) AS [{alias}]";
-                }
-            }
-            return string.Empty;
-        }
-
-        private string ParseConditional(string alias, JsonNode value)
-        {
-            // Simplified conditional parsing
-            // Full implementation would parse the condition, then branches
-            // For now, return empty to avoid complexity
-            return string.Empty;
-        }
 
         // --- Sorting and Pagination Methods ---
 

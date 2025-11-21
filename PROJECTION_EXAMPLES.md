@@ -1,15 +1,13 @@
 # MongoDB $project Operator - MS SQL Translation Examples
 
-This document provides comprehensive examples of how the `$project` operator in MongoDB queries is translated to MS SQL Server syntax.
+This document provides examples of how the `$project` operator in MongoDB queries is translated to MS SQL Server syntax.
 
 ## Quick Reference
 
 The `$project` operator controls the SELECT clause in the generated SQL query, allowing you to:
-- Include/exclude specific fields
-- Rename fields (aliasing)
-- Create computed fields using expressions
-- Perform string concatenation and arithmetic operations
-- Handle null values with defaults
+- Include/exclude specific fields using simple 1/0 or true/false values
+
+**Note:** Advanced features such as field aliasing, computed fields, expressions, string concatenation, arithmetic operations, and null handling are NOT supported.
 
 ## Usage in SqlQuery Result
 
@@ -31,7 +29,7 @@ string sql = $@"
 
 ## Examples
 
-### 1. Basic Field Selection
+### 1. Basic Field Inclusion
 
 **MongoDB Query:**
 ```json
@@ -53,10 +51,57 @@ WHERE 1=1
 
 ---
 
-### 2. Field Aliasing
+### 2. Field Exclusion (0 or false)
 
 **MongoDB Query:**
 ```json
+{
+  "$project": { "name": 1, "email": 1, "age": 0 }
+}
+```
+
+**Result:**
+- `SelectClause`: `[name], [email]`
+- `WhereClause`: `1=1`
+
+**Generated SQL:**
+```sql
+SELECT [name], [email]
+FROM Users
+WHERE 1=1
+```
+
+---
+
+### 3. Using Boolean Values
+
+**MongoDB Query:**
+```json
+{
+  "$project": { "name": true, "email": false }
+}
+```
+
+**Result:**
+- `SelectClause`: `[name]`
+- `WhereClause`: `1=1`
+
+**Generated SQL:**
+```sql
+SELECT [name]
+FROM Users
+WHERE 1=1
+```
+
+---
+
+## Unsupported Features
+
+The following MongoDB `$project` features are **NOT supported**:
+
+### Field Aliasing (Removed)
+```json
+// NOT SUPPORTED
 {
   "$project": { 
     "userName": "$name", 
@@ -65,23 +110,9 @@ WHERE 1=1
 }
 ```
 
-**Result:**
-- `SelectClause`: `[name] AS [userName], [email] AS [userEmail]`
-- `WhereClause`: `1=1`
-
-**Generated SQL:**
-```sql
-SELECT [name] AS [userName], [email] AS [userEmail]
-FROM Users
-WHERE 1=1
-```
-
----
-
-### 3. String Concatenation
-
-**MongoDB Query:**
+### String Concatenation (Removed)
 ```json
+// NOT SUPPORTED
 {
   "$project": { 
     "fullName": { 
@@ -91,95 +122,19 @@ WHERE 1=1
 }
 ```
 
-**Result:**
-- `SelectClause`: `CONCAT([firstName], ' ', [lastName]) AS [fullName]`
-- `WhereClause`: `1=1`
-
-**Generated SQL:**
-```sql
-SELECT CONCAT([firstName], ' ', [lastName]) AS [fullName]
-FROM Users
-WHERE 1=1
-```
-
----
-
-### 4. Arithmetic Operations
-
-#### Addition
-**MongoDB Query:**
+### Arithmetic Operations (Removed)
 ```json
+// NOT SUPPORTED
 {
   "$project": { 
-    "total": { "$add": ["$price", "$tax"] } 
+    "total": { "$add": ["$price", "$tax"] }
   }
 }
 ```
 
-**Generated SQL:**
-```sql
-SELECT ([price] + [tax]) AS [total]
-FROM Products
-WHERE 1=1
-```
-
-#### Subtraction
-**MongoDB Query:**
+### Null Handling (Removed)
 ```json
-{
-  "$project": { 
-    "netPrice": { "$subtract": ["$price", "$discount"] } 
-  }
-}
-```
-
-**Generated SQL:**
-```sql
-SELECT ([price] - [discount]) AS [netPrice]
-FROM Products
-WHERE 1=1
-```
-
-#### Multiplication
-**MongoDB Query:**
-```json
-{
-  "$project": { 
-    "lineTotal": { "$multiply": ["$quantity", "$price"] } 
-  }
-}
-```
-
-**Generated SQL:**
-```sql
-SELECT ([quantity] * [price]) AS [lineTotal]
-FROM OrderItems
-WHERE 1=1
-```
-
-#### Division
-**MongoDB Query:**
-```json
-{
-  "$project": { 
-    "average": { "$divide": ["$sum", "$count"] } 
-  }
-}
-```
-
-**Generated SQL:**
-```sql
-SELECT ([sum] / [count]) AS [average]
-FROM Statistics
-WHERE 1=1
-```
-
----
-
-### 5. Null Handling with $ifNull
-
-**MongoDB Query:**
-```json
+// NOT SUPPORTED
 {
   "$project": { 
     "displayName": { "$ifNull": ["$nickname", "Anonymous"] } 
@@ -187,19 +142,13 @@ WHERE 1=1
 }
 ```
 
-**Result:**
-- `SelectClause`: `ISNULL([nickname], 'Anonymous') AS [displayName]`
+### Computed Fields and Expressions (Removed)
 
-**Generated SQL:**
-```sql
-SELECT ISNULL([nickname], 'Anonymous') AS [displayName]
-FROM Users
-WHERE 1=1
-```
+All expression operators including `$concat`, `$add`, `$subtract`, `$multiply`, `$divide`, `$ifNull`, `$cond`, and `$literal` are not supported.
 
 ---
 
-### 6. Complex Query: Projection + Filtering + Sorting
+## Complete Example with Filtering and Sorting
 
 **MongoDB Query:**
 ```json
@@ -231,38 +180,6 @@ OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY
 
 ---
 
-### 7. Mixed Expressions
-
-**MongoDB Query:**
-```json
-{
-  "$project": { 
-    "userName": "$name",
-    "fullName": { "$concat": ["$firstName", " ", "$lastName"] },
-    "totalPrice": { "$add": ["$price", "$tax"] },
-    "displayStatus": { "$ifNull": ["$status", "pending"] }
-  },
-  "isActive": true
-}
-```
-
-**Result:**
-- `SelectClause`: `[name] AS [userName], CONCAT([firstName], ' ', [lastName]) AS [fullName], ([price] + [tax]) AS [totalPrice], ISNULL([status], 'pending') AS [displayStatus]`
-- `WhereClause`: `[isActive] = @p0`
-
-**Generated SQL:**
-```sql
-SELECT 
-    [name] AS [userName], 
-    CONCAT([firstName], ' ', [lastName]) AS [fullName], 
-    ([price] + [tax]) AS [totalPrice], 
-    ISNULL([status], 'pending') AS [displayStatus]
-FROM Users
-WHERE [isActive] = @p0
-```
-
----
-
 ## Integration with Field Mapping
 
 The `$project` operator respects field mappings defined in the converter:
@@ -284,21 +201,6 @@ string mongoQuery = @"{
 var result = converter.Parse(mongoQuery);
 // SelectClause: "u.id, u.email"
 ```
-
----
-
-## Supported Expressions Summary
-
-| MongoDB Expression | SQL Translation | Example |
-|-------------------|-----------------|---------|
-| `{ "field": 1 }` | `[field]` | Field inclusion |
-| `{ "alias": "$field" }` | `[field] AS [alias]` | Aliasing |
-| `{ "$concat": ["$a", "text", "$b"] }` | `CONCAT([a], 'text', [b])` | String concatenation |
-| `{ "$add": ["$a", "$b"] }` | `([a] + [b])` | Addition |
-| `{ "$subtract": ["$a", "$b"] }` | `([a] - [b])` | Subtraction |
-| `{ "$multiply": ["$a", "$b"] }` | `([a] * [b])` | Multiplication |
-| `{ "$divide": ["$a", "$b"] }` | `([a] / [b])` | Division |
-| `{ "$ifNull": ["$field", "default"] }` | `ISNULL([field], 'default')` | Null coalescing |
 
 ---
 
@@ -327,8 +229,8 @@ WHERE [status] = @p0
 
 1. **Security**: The `$project` operator respects the same security constraints as other operators
 2. **Field Mapping**: All field names in `$project` go through the field mapping system
-3. **Computed Fields**: Expressions are evaluated at query time in SQL Server
-4. **No Exclusion-Only**: If you specify `$project`, include the fields you want (exclusion-only mode like `{ "field": 0 }` is supported but typically used with inclusion)
+3. **Simple Inclusion Only**: Only basic field inclusion (1/true) and exclusion (0/false) are supported
+4. **No Advanced Features**: Field aliasing, computed expressions, and aggregation operators are not supported
 
 ---
 
@@ -341,3 +243,4 @@ dotnet run
 ```
 
 Look for the section: `=== Starting $project Operator Tests ===`
+

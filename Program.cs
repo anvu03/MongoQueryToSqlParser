@@ -105,49 +105,28 @@ RunProjectTest(converter, "Basic Field Inclusion",
     expectedWhere: "1=1"
 );
 
-// Test 2: Field exclusion (just filtering)
+// Test 2: Field inclusion with filter
 RunProjectTest(converter, "Field Inclusion with Filter",
     json: @"{ ""$project"": { ""name"": 1, ""age"": 1 }, ""status"": ""active"" }",
     expectedSelect: "[name], [age]",
     expectedWhere: "[status] = @p0"
 );
 
-// Test 3: Field aliasing
-RunProjectTest(converter, "Field Aliasing",
-    json: @"{ ""$project"": { ""userName"": ""$name"", ""userEmail"": ""$email"" } }",
-    expectedSelect: "[name] AS [userName], [email] AS [userEmail]",
+// Test 3: Field exclusion using 0
+RunProjectTest(converter, "Field Exclusion with 0",
+    json: @"{ ""$project"": { ""name"": 1, ""email"": 1, ""password"": 0 } }",
+    expectedSelect: "[name], [email]",
     expectedWhere: "1=1"
 );
 
-// Test 4: String concatenation
-RunProjectTest(converter, "String Concatenation",
-    json: @"{ ""$project"": { ""fullName"": { ""$concat"": [""$firstName"", "" "", ""$lastName""] } } }",
-    expectedSelect: "CONCAT([firstName], @p0, [lastName]) AS [fullName]",
+// Test 4: Field inclusion using boolean true/false
+RunProjectTest(converter, "Field Inclusion with Boolean",
+    json: @"{ ""$project"": { ""name"": true, ""email"": false } }",
+    expectedSelect: "[name]",
     expectedWhere: "1=1"
 );
 
-// Test 5: Arithmetic operations - Addition
-RunProjectTest(converter, "Arithmetic Addition",
-    json: @"{ ""$project"": { ""total"": { ""$add"": [""$price"", ""$tax""] } } }",
-    expectedSelect: "([price] + [tax]) AS [total]",
-    expectedWhere: "1=1"
-);
-
-// Test 6: Arithmetic operations - Subtraction
-RunProjectTest(converter, "Arithmetic Subtraction",
-    json: @"{ ""$project"": { ""discount"": { ""$subtract"": [""$price"", ""$discount_amount""] } } }",
-    expectedSelect: "([price] - [discount_amount]) AS [discount]",
-    expectedWhere: "1=1"
-);
-
-// Test 7: ISNULL handling
-RunProjectTest(converter, "ISNULL Handling",
-    json: @"{ ""$project"": { ""displayName"": { ""$ifNull"": [""$nickname"", ""Unknown""] } } }",
-    expectedSelect: "ISNULL([nickname], @p0) AS [displayName]",
-    expectedWhere: "1=1"
-);
-
-// Test 8: Complex - Project with filter and sort
+// Test 5: Complex - Project with filter and sort
 RunProjectTest(converter, "Complex Query with Project, Filter, and Sort",
     json: @"{ 
         ""$project"": { ""name"": 1, ""email"": 1 }, 
@@ -159,50 +138,14 @@ RunProjectTest(converter, "Complex Query with Project, Filter, and Sort",
     expectedOrderBy: "ORDER BY [name] ASC"
 );
 
-// Test 9: Multiply operation
-RunProjectTest(converter, "Arithmetic Multiplication",
-    json: @"{ ""$project"": { ""total"": { ""$multiply"": [""$quantity"", ""$price""] } } }",
-    expectedSelect: "([quantity] * [price]) AS [total]",
-    expectedWhere: "1=1"
-);
-
-// Test 10: Divide operation
-RunProjectTest(converter, "Arithmetic Division",
-    json: @"{ ""$project"": { ""average"": { ""$divide"": [""$sum"", ""$count""] } } }",
-    expectedSelect: "([sum] / [count]) AS [average]",
-    expectedWhere: "1=1"
+// Test 6: No projection specified (should default to SELECT *)
+RunProjectTest(converter, "No Projection Defaults to SELECT *",
+    json: @"{ ""status"": ""active"" }",
+    expectedSelect: "*",
+    expectedWhere: "[status] = @p0"
 );
 
 Console.WriteLine("\n=== $project Operator Tests Completed ===");
-
-// === SQL Injection Security Tests ===
-Console.WriteLine("\n=== Starting SQL Injection Security Tests ===\n");
-
-// Test 1: Attempt SQL injection via $concat literal string
-RunSecurityProjectTest(converter, "SQL Injection via $concat",
-    json: @"{ ""$project"": { ""malicious"": { ""$concat"": [""test'; DROP TABLE Users; --""] } } }",
-    shouldBeParameterized: true
-);
-
-// Test 2: Attempt SQL injection via $ifNull default value
-RunSecurityProjectTest(converter, "SQL Injection via $ifNull",
-    json: @"{ ""$project"": { ""exploit"": { ""$ifNull"": [""$name"", ""'; DROP TABLE Users; --""] } } }",
-    shouldBeParameterized: true
-);
-
-// Test 3: Attempt SQL injection via $add arithmetic operand
-RunSecurityProjectTest(converter, "SQL Injection via $add",
-    json: @"{ ""$project"": { ""exploit"": { ""$add"": [""$price"", ""1; DROP TABLE Users; --""] } } }",
-    shouldBeParameterized: true
-);
-
-// Test 4: Complex injection attempt with nested expressions
-RunSecurityProjectTest(converter, "Complex SQL Injection Attempt",
-    json: @"{ ""$project"": { ""hack"": { ""$concat"": [""$name"", ""' OR '1'='1""] } } }",
-    shouldBeParameterized: true
-);
-
-Console.WriteLine("\n=== SQL Injection Security Tests Completed ===");
 
 Console.WriteLine("\n=== Tests Completed ===");
 
@@ -384,56 +327,6 @@ static void RunProjectTest(
             {
                 Console.WriteLine($"   Expected ORDER BY: {expectedOrderBy}");
                 Console.WriteLine($"   Actual ORDER BY:   {result.OrderByClause}");
-            }
-        }
-    }
-    catch (Exception ex)
-    {
-        PrintResult(testName, false);
-        Console.WriteLine($"   Exception: {ex.Message}");
-    }
-}
-
-static void RunSecurityProjectTest(
-    MongoToSqlConverter converter,
-    string testName,
-    string json,
-    bool shouldBeParameterized)
-{
-    try
-    {
-        var result = converter.Parse(json);
-
-        // Check if dangerous strings are NOT directly in the SQL (they should be in parameters)
-        bool hasDirectInjection = result.SelectClause.Contains("DROP TABLE") || 
-                                   result.SelectClause.Contains("'; ") ||
-                                   result.SelectClause.Contains("OR '1'='1");
-
-        // Check if values are properly parameterized
-        bool hasParameters = result.Parameters.Count > 0;
-
-        bool isSecure = !hasDirectInjection && (shouldBeParameterized ? hasParameters : true);
-
-        if (isSecure)
-        {
-            PrintResult(testName, true);
-            if (result.Parameters.Count > 0)
-            {
-                Console.WriteLine($"   ✓ Values safely parameterized: {result.Parameters.Count} parameter(s)");
-            }
-        }
-        else
-        {
-            PrintResult(testName, false);
-            Console.WriteLine($"   ✗ SECURITY ISSUE: SQL injection vulnerability detected!");
-            Console.WriteLine($"   Generated SELECT: {result.SelectClause}");
-            if (hasDirectInjection)
-            {
-                Console.WriteLine($"   ✗ Dangerous string found directly in SQL!");
-            }
-            if (shouldBeParameterized && !hasParameters)
-            {
-                Console.WriteLine($"   ✗ Expected parameterized values but found none!");
             }
         }
     }
